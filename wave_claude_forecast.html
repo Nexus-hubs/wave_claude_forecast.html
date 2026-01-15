@@ -1054,29 +1054,63 @@ footer a:hover { text-decoration: underline; }
   async function searchLocations(query) {
     if (!query || query.length < 2) return [];
     const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=5&language=en&format=json`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('Geocoding failed');
-    const data = await res.json();
-    return data.results || [];
+    console.log('Geocoding API request:', url);
+    try {
+      const res = await fetch(url);
+      console.log('Geocoding API response:', res.status, res.statusText);
+      if (!res.ok) throw new Error(`Geocoding failed: ${res.status} ${res.statusText}`);
+      const data = await res.json();
+      console.log('Geocoding data:', data);
+      return data.results || [];
+    } catch (error) {
+      console.error('Geocoding error:', error);
+      throw error;
+    }
   }
 
   async function fetchForecast(lat, lon) {
     const marineUrl = `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lon}&hourly=wave_height,wave_direction,wave_period,swell_wave_height,swell_wave_direction,swell_wave_period&daily=wave_height_max,wave_direction_dominant,wave_period_max&timezone=auto&forecast_days=7`;
     const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,precipitation,wind_speed_10m,wind_direction_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto&forecast_days=7`;
 
-    const [marineRes, weatherRes] = await Promise.all([
-      fetch(marineUrl),
-      fetch(weatherUrl)
-    ]);
+    console.log('Marine API request:', marineUrl);
+    console.log('Weather API request:', weatherUrl);
 
-    if (!marineRes.ok || !weatherRes.ok) {
-      throw new Error('Failed to fetch forecast data');
+    try {
+      const [marineRes, weatherRes] = await Promise.all([
+        fetch(marineUrl),
+        fetch(weatherUrl)
+      ]);
+
+      console.log('Marine API response:', marineRes.status, marineRes.statusText);
+      console.log('Weather API response:', weatherRes.status, weatherRes.statusText);
+
+      if (!marineRes.ok) {
+        const errorText = await marineRes.text();
+        console.error('Marine API error response:', errorText);
+        throw new Error(`Marine API failed: ${marineRes.status} ${marineRes.statusText}`);
+      }
+
+      if (!weatherRes.ok) {
+        const errorText = await weatherRes.text();
+        console.error('Weather API error response:', errorText);
+        throw new Error(`Weather API failed: ${weatherRes.status} ${weatherRes.statusText}`);
+      }
+
+      const marine = await marineRes.json();
+      const weather = await weatherRes.json();
+
+      console.log('Marine data received:', marine);
+      console.log('Weather data received:', weather);
+
+      return { marine, weather };
+    } catch (error) {
+      console.error('Forecast fetch error:', error);
+      // Check if it's a CORS or network error
+      if (error.message && error.message.includes('Failed to fetch')) {
+        throw new Error('Network error: Unable to connect to API. If running from file://, please use a local web server.');
+      }
+      throw error;
     }
-
-    const marine = await marineRes.json();
-    const weather = await weatherRes.json();
-
-    return { marine, weather };
   }
 
   // ============ CACHE ============
@@ -1293,20 +1327,25 @@ footer a:hover { text-decoration: underline; }
 
   // ============ LOCATION SELECTION ============
   async function selectLocation(loc) {
+    console.log('Selecting location:', loc);
     state.location = loc;
     state.isCached = false;
     showState('loading');
 
     try {
       if (state.isOnline) {
+        console.log('Online mode - fetching fresh data');
         const forecast = await fetchForecast(loc.lat, loc.lon);
         state.forecast = forecast;
         cacheForcast(loc.lat, loc.lon, forecast);
+        console.log('Forecast loaded successfully');
       } else {
+        console.log('Offline mode - checking cache');
         const cached = getCachedForecast(loc.lat, loc.lon);
         if (cached) {
           state.forecast = cached;
           state.isCached = true;
+          console.log('Using cached data');
         } else {
           throw new Error('No cached data available offline');
         }
@@ -1314,16 +1353,20 @@ footer a:hover { text-decoration: underline; }
       showState('forecast');
       renderForecast();
     } catch (err) {
-      console.error(err);
+      console.error('Error loading forecast:', err);
       // Try cache as fallback
       const cached = getCachedForecast(loc.lat, loc.lon);
       if (cached) {
+        console.log('Using cached data as fallback');
         state.forecast = cached;
         state.isCached = true;
         showState('forecast');
         renderForecast();
       } else {
-        dom.errorMessage.textContent = err.message || 'Failed to load forecast';
+        console.error('No cached data available');
+        const errorMsg = err.message || 'Failed to load forecast';
+        dom.errorMessage.textContent = errorMsg;
+        console.error('Showing error state:', errorMsg);
         showState('error');
       }
     }
@@ -1583,10 +1626,21 @@ footer a:hover { text-decoration: underline; }
 
   // ============ INIT ============
   function init() {
+    console.log('Wave Claude Forecast initializing...');
+    console.log('Protocol:', window.location.protocol);
+    console.log('Online status:', navigator.onLine);
+
+    // Check if running from file:// protocol
+    if (window.location.protocol === 'file:') {
+      console.warn('⚠️ Running from file:// protocol. API calls may fail due to CORS restrictions.');
+      console.warn('💡 Solution: Run a local web server (e.g., "python3 -m http.server" or "npx serve")');
+    }
+
     loadSettings();
     renderQuickRegions();
     renderFavorites();
     showState('empty');
+    console.log('Wave Claude Forecast initialized successfully');
   }
 
   init();
